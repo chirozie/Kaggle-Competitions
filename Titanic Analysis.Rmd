@@ -1,0 +1,197 @@
+---
+title: "Titanic Survival Prediction"
+author: "Chu Ngwoke"
+date: "03/08/2021"
+output: html_document
+---
+
+## Introduction
+
+RMS Titanic was the largest ship afloat at the time she entered service and was the second of the three Olympic-class ocean liners by the White Star Line. It was largely thought to be unsinkable, however, on its maiden voyage on 14th April, 1912, It collided with an iceberg and sank, resulting in one of the most famous tragedies in modern history. 1502 out of 2224 passengers and crew died. 
+
+While there was some element of luck involved in surviving, it seems some groups of people on the ship were more likely to survive than others. In this analysis, a predictive model is built to answer the question: “what sorts of people were more likely to survive?” using passenger data (ie name, age, gender, socio-economic class, etc)
+
+## Loading Data and Required Packages
+
+The dataset comes from kaggle Titanic competition page. You can find the it [here](https://www.kaggle.com/c/titanic/data). This is an open data on the passengers aboard the RMS Titanic on its tragic voyage. The data has been split into train and test sets. The train set has 891 observations while the test set has 418 observations. A data dictionary defining the variables in the dataset is provided in the link above.
+
+```{r warning=FALSE, message=FALSE}
+test_data <- read.csv("test.csv")
+train_data <- read.csv("train.csv")
+
+library(tidyr)
+library(ggplot2)
+library(GGally)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+```
+
+## Data Cleaning
+
+```{r}
+str(train_data)     # structure of the datasets
+#str(test_data)
+
+colSums(is.na(train_data))  # checking for missing values in the dataset
+#colSums(is.na(test_data))
+
+colSums(train_data == "")
+
+# There are a lot of missings data in the Age variable.
+# 177 out of 891 passengers have missing age in the train data
+# 86 out 418 passengers have missing age in the test set.
+# There are 2 empty strings in Embarked and many empty strings in Cabin variable
+
+train_data$Age[is.na(train_data$Age)] <- mean(train_data$Age, na.rm = T) #replacing the NAs in age with mean age
+train_data$Embarked[train_data$Embarked == ""] = "C"   # Replacing the missing Embarked with the first port
+```
+
+
+```{r}
+apply(train_data, 2, function(x) length(unique(x)))  #checking the columns that are factors
+
+# The variables Survived, Pclass, Sex and Embarked are factors.
+# converting them to factors
+
+cols <- c("Survived", "Pclass", "Sex", "Embarked")
+for (i in cols){
+  train_data[,i] <- as.factor(train_data[,i])
+}
+
+str(train_data)  # viewing the structure of the dataset
+```
+
+
+## Analysis
+
+The data has been loaded and cleaned up. I proceed to analyse the data to find the relationship between each variable and survival. I will use Percentage bar plots to visualize the relative chance of survival due to each variable 
+
+```{r}
+# Sex and survival
+ggplot(data = train_data, aes(x=Sex, fill=Survived)) + geom_bar(position = "fill") + ylab("Proportion")
+
+
+# Port of Embarkation and Survival
+ggplot(data = train_data, aes(x=Embarked, fill=Survived)) + geom_bar(position = "fill") + ylab("Proportion")
+
+# Ticket Class and Survival
+ggplot(data = train_data, aes(x=Pclass, fill=Survived)) + geom_bar(position = "fill") + ylab("Proportion")
+
+# Age and Survivial
+ggplot(data = train_data, aes(x=Age, fill=Survived)) + geom_histogram(binwidth = 3, position = "fill") + ylab("Proportion")
+
+# Parch (Number of Parents and Children aboard) and Survival
+ggplot(data = train_data, aes(x=Parch, fill=Survived)) + geom_bar(position = "fill")
+
+# SibSp (Number of Siblings and Spouse aboard) and Survival
+ggplot(data = train_data, aes(x=SibSp, fill=Survived)) + geom_bar(position = "fill")
+
+```
+
+
+From the plots, It appears that;
+
+- Females had a higher chance (75%) of survival as opposed to less than 25% for males.
+ 
+- Passengers that embarked at the first port had a slightly higehr chance of survival but this is not clearly different from the other ports
+ 
+- Passengers in the lower ticket class (class 1) had a higher chance of survival and passengers in the highest class had the least chance of survival
+
+- Children younger than 10 years and Old people 80 years and above had the higher chance of survival than other ages
+
+- Passengers with less than 4 Sibling/Spouse and/or 4 Parent/Child aboard had a higher chance of survival
+
+
+## Prediction
+
+I have identified how some of the variables affect probability of survival. I proceed to build a prediction model based on these variables. I will use logistic regression, random forest and decision tree classifications to build my model. I split the training set into a train set (train1) and a test set (train2) in a ratio of 70:30 to be able to estimate error in my models.
+
+```{r}
+# Splitting the train data into train and test sets
+library(caret)
+set.seed(1234)  # setting seed for reproducibility
+
+index <- createDataPartition(train_data$Survived, p = 0.7, list = FALSE)
+train1 <- train_data[index,]
+train2 <- train_data[-index,]
+```
+
+### Logistic Regression Model
+
+```{r}
+# Let me run a logistic regression with the variables
+model1 <- glm(Survived ~ Sex+Age+Embarked+SibSp+Parch+Pclass, data = train1, family = binomial(link = "logit"))
+summary(model1)
+
+# The model summary shows that the Parch and Embarked variables are not statistically significant
+
+# Using model1 to predict survival on the test set
+
+pred1 <- predict(model1, train2)
+pred1 <- ifelse(pred1 > 0.5, 1, 0)
+t1 <- table(pred1, train2$Survived)
+confusionMatrix(t1) # confusion matrix to compute the accuracy of the model
+
+# Model1 has an accuracy of 79.3%
+
+```
+
+### Decision Tree Model
+
+```{r}
+model2 <- rpart(Survived~Sex+Age+Embarked+SibSp+Parch+Pclass, data = train1, method = "class")
+rpart.plot(model2)  #building the model and showing the part plot
+
+# predicting using model2
+pred2 <- predict(model2, train2, type="class")
+t2 <- table(pred2, train2$Survived)
+confusionMatrix(t2)
+
+# The accuracy of the second model is 78.2%, slighlty less than the first model
+```
+
+
+### Random Forest Model
+
+```{r}
+model3 <- randomForest(Survived~Sex+Age+Embarked+SibSp+Parch+Pclass, train2)
+plot(model3)  # building the random forest model and ploting it
+
+# Predicting with the random forest model
+pred3 <- predict(model3, train2)
+t3 <- table(pred3, train2$Survived)
+confusionMatrix(t3)
+
+# The accuracy of the 3rd model is 89.5%. I therefore select this as my best model and use it on the main test set
+```
+
+### Prediction on Test Dataset
+
+```{r}
+# cleaning the test data
+
+cols2 <- c("Pclass", "Sex", "Embarked")
+for (i in cols2){
+  test_data[,i] <- as.factor(test_data[,i])
+}
+test_data$Age[is.na(test_data$Age)] <- mean(test_data$Age, na.rm = T) #replacing the NAs in age with mean age
+test_data$Embarked[test_data$Embarked == ""] = "C"   # Replacing the missing Embarked with the first port
+
+pred4 <- predict(model3, test_data)
+
+titanic_prediction <- data.frame(test_data$PassengerId, pred4) # producing the required prediction table
+
+names(titanic_prediction) <- c("PassengerId", "Survived")
+
+write.csv(titanic_prediction, file = "my_titanic_prediction.csv", row.names = F) #writing the table as csv to my drive
+```
+
+
+## Conclusion
+
+The titanic dataset has been analysed in this work. Exploratory data analysis was done to understand the influence of the variables on survival. Prediction models were built to predict survival on the Titanic ship using 3 techniques, namely, Logistic regression, decision tree and random forest classification. The random forest model had the highest accuracy of **89.5%** and was hence selected as the best prediction model.
+
+
+
+
